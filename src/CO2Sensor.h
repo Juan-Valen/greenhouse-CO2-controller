@@ -1,0 +1,26 @@
+#pragma once
+
+#include <memory>
+#include <cstdint>
+#include "PicoOsUart.h"
+#include "ModbusClient.h"
+
+class CO2Sensor {
+public:
+    // Constructor
+    CO2Sensor(int uart_nr, int tx_pin, int rx_pin, int baudrate, uint8_t modbus_address);
+
+    // Read CO2 value from sensor (in ppm)
+    bool readCO2(float &ppm);
+
+    // Optional: start FreeRTOS task to poll periodically
+    void startTask(uint32_t interval_ms);
+
+private:
+    std::shared_ptr<PicoOsUart> uart;
+    std::shared_ptr<ModbusClient> modbus;
+    uint8_t address;
+
+    // FreeRTOS task function
+    static void taskFunc(void* param);
+};
