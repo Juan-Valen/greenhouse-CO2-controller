@@ -37,7 +37,7 @@ void CO2Sensor::startTask(uint32_t interval_ms)
 void CO2Sensor::taskFunc(void *param)
 {
     CO2Sensor *self = static_cast<CO2Sensor*>(param);
-    while (1){
+          while (1){
         self->readCO2();
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
