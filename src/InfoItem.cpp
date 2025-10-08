@@ -1,8 +1,8 @@
 #include "InfoItem.h"
 #include "ssd1306os.h"
+
 InfoItem::InfoItem(std::string menu_title, ssd1306os display)
     : MenuItem(menu_title, display) {};
-
 bool InfoItem::event(MenuItem::menuEvent e) {
   bool handled = true;
   if (e == MenuItem::ok) {
@@ -23,6 +23,7 @@ void InfoItem::show() {
   }
   display.show();
 }
+
 void InfoItem::updateValue(std::string key, std::string value) {
   values[key] = value;
 };

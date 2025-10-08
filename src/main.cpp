@@ -1,259 +1,190 @@
-#include <iostream>
-#include <sstream>
 #include "FreeRTOS.h"
-#include "task.h"
-#include "semphr.h"
-#include "hardware/gpio.h"
+#include "InfoItem.h"
+#include "Menu.h"
 #include "PicoOsUart.h"
+#include "hardware/gpio.h"
+#include "projdefs.h"
+#include "rotary.h"
+#include "semphr.h"
 #include "ssd1306.h"
-
+#include "task.h"
+#include <CO2Sensor.h>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <iostream>
+#include <memory>
+#include <sstream>
+#include <string>
 
 #include "hardware/timer.h"
 extern "C" {
-uint32_t read_runtime_ctr(void) {
-    return timer_hw->timerawl;
-}
+uint32_t read_runtime_ctr(void) { return timer_hw->timerawl; }
 }
 
 #include "blinker.h"
 
-SemaphoreHandle_t gpio_sem;
+SemaphoreHandle_t gpio_sem_rot;
+SemaphoreHandle_t gpio_sem_rot_sw;
 
-void gpio_callback(uint gpio, uint32_t events) {
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    // signal task that a button was pressed
-    xSemaphoreGiveFromISR(gpio_sem, &xHigherPriorityTaskWoken);
+void rot_callback(uint gpio, uint32_t events) {
+  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+  static uint32_t last_time = 0;
+  if (gpio == 10) {
+    xSemaphoreGiveFromISR(gpio_sem_rot, &xHigherPriorityTaskWoken);
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+  } else if (gpio == 12) {
+    uint32_t now = to_ms_since_boot(get_absolute_time());
+    if (now - last_time > 250) {
+      last_time = now;
+      xSemaphoreGiveFromISR(gpio_sem_rot_sw, &xHigherPriorityTaskWoken);
+      portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    }
+  }
 }
 
-struct led_params{
-    uint pin;
-    uint delay;
+struct rot_params {
+  QueueHandle_t comm_rot;
 };
 
-void blink_task(void *param)
-{
-    auto lpr = (led_params *) param;
-    const uint led_pin = lpr->pin;
-    const uint delay = pdMS_TO_TICKS(lpr->delay);
-    gpio_init(led_pin);
-    gpio_set_dir(led_pin, GPIO_OUT);
-    while (true) {
-        gpio_put(led_pin, true);
-        vTaskDelay(delay);
-        gpio_put(led_pin, false);
-        vTaskDelay(delay);
+struct rot_sw_params {
+  QueueHandle_t comm_sw;
+};
+
+struct display_params {
+  QueueHandle_t comm_rot;
+  QueueHandle_t comm_sw;
+  QueueHandle_t sensor_1_queue;
+  /*
+QueueHandle_t comm_temp;
+QueueHandle_t comm_hum;
+QueueHandle_t comm_pres;
+   */
+};
+
+void rotary_task(void *param) {
+  auto tpr = (rot_params *)param;
+  // Rotary encoder
+  static Rotary rot(10, 11, 12);
+  bool clockwise;
+  // IRQ
+  gpio_set_irq_enabled_with_callback(10, GPIO_IRQ_EDGE_RISE, true,
+                                     &rot_callback);
+  while (true) {
+    if (xSemaphoreTake(gpio_sem_rot, portMAX_DELAY) == pdTRUE) {
+      clockwise = rot.rotatingClockwise();
+      xQueueSendToBack(tpr->comm_rot, (void *)&clockwise, 0);
     }
+  }
 }
 
-void gpio_task(void *param) {
-    (void) param;
-    const uint button_pin = 9;
-    const uint led_pin = 22;
-    const uint delay = pdMS_TO_TICKS(250);
-    gpio_init(led_pin);
-    gpio_set_dir(led_pin, GPIO_OUT);
-    gpio_init(button_pin);
-    gpio_set_dir(button_pin, GPIO_IN);
-    gpio_set_pulls(button_pin, true, false);
-    gpio_set_irq_enabled_with_callback(button_pin, GPIO_IRQ_EDGE_FALL, true, &gpio_callback);
-    while(true) {
-        if(xSemaphoreTake(gpio_sem, portMAX_DELAY) == pdTRUE) {
-            //std::cout << "button event\n";
-            gpio_put(led_pin, 1);
-            vTaskDelay(delay);
-            gpio_put(led_pin, 0);
-            vTaskDelay(delay);
-        }
+void rotary_sw_task(void *param) {
+  static bool value = true;
+  auto tpr = (rot_sw_params *)param;
+  // IRQ
+  gpio_set_irq_enabled_with_callback(12, GPIO_IRQ_EDGE_FALL, true,
+                                     &rot_callback);
+  while (true) {
+    if (xSemaphoreTake(gpio_sem_rot_sw, portMAX_DELAY) == pdTRUE) {
+      xQueueSendToBack(tpr->comm_sw, (void *)&value, 0);
     }
+  }
 }
 
-void serial_task(void *param)
-{
-    PicoOsUart u(0, 0, 1, 115200);
-    Blinker blinky(20);
-    uint8_t buffer[64];
-    std::string line;
-    while (true) {
-        if(int count = u.read(buffer, 63, 30); count > 0) {
-            u.write(buffer, count);
-            buffer[count] = '\0';
-            line += reinterpret_cast<const char *>(buffer);
-            if(line.find_first_of("\n\r") != std::string::npos){
-                u.send("\n");
-                std::istringstream input(line);
-                std::string cmd;
-                input >> cmd;
-                if(cmd == "delay") {
-                    uint32_t i = 0;
-                    input >> i;
-                    blinky.on(i);
-                }
-                else if (cmd == "off") {
-                    blinky.off();
-                }
-                line.clear();
-            }
-        }
-    }
-}
-
-void modbus_task(void *param);
 void display_task(void *param);
-void i2c_task(void *param);
-extern "C" {
-    void tls_test(void);
-}
-void tls_task(void *param)
-{
-    tls_test();
-    while(true) {
-        vTaskDelay(100);
-    }
-}
 
-int main()
-{
-    static led_params lp1 = { .pin = 20, .delay = 300 };
-    stdio_init_all();
-    printf("\nBoot\n");
+int main() {
+  stdio_init_all();
+  printf("\nBoot\n");
 
-    gpio_sem = xSemaphoreCreateBinary();
-    //xTaskCreate(blink_task, "LED_1", 256, (void *) &lp1, tskIDLE_PRIORITY + 1, nullptr);
-    //xTaskCreate(gpio_task, "BUTTON", 256, (void *) nullptr, tskIDLE_PRIORITY + 1, nullptr);
-    //xTaskCreate(serial_task, "UART1", 256, (void *) nullptr,
-    //            tskIDLE_PRIORITY + 1, nullptr);
-#if 0
-    xTaskCreate(modbus_task, "Modbus", 512, (void *) nullptr,
-                tskIDLE_PRIORITY + 1, nullptr);
+  // Parameters
+  static rot_params rt0 = {};
+  static rot_sw_params rt_sw = {};
+  static display_params dp0 = {};
+  // Queue
+  rt0.comm_rot = xQueueCreate(20, sizeof(bool));
+  rt_sw.comm_sw = xQueueCreate(5, sizeof(bool));
+  auto sensor_1_queue = xQueueCreate(5, sizeof(bool));
+  dp0.comm_rot = rt0.comm_rot;
+  dp0.comm_sw = rt_sw.comm_sw;
+  dp0.sensor_1_queue = sensor_1_queue;
+  // Semaphores
+  gpio_sem_rot = xSemaphoreCreateBinary();
+  gpio_sem_rot_sw = xSemaphoreCreateBinary();
+  // CO2
 
+  CO2Sensor co2(1, 4, 5, 9600,
+                240);            // UART1, TX4/RX5, 9600 bps, Modbus address 240
+  co2.startTask(sensor_1_queue); // poll every 1 second
+  // TASKS
+  xTaskCreate(rotary_task, "rotary_encoder", 256, (void *)&rt0,
+              tskIDLE_PRIORITY + 1, nullptr);
+  xTaskCreate(rotary_sw_task, "rotary_encoder_sw", 256, (void *)&rt_sw,
+              tskIDLE_PRIORITY + 1, nullptr);
+  xTaskCreate(display_task, "SSD1306", 512, (void *)&dp0, tskIDLE_PRIORITY + 1,
+              nullptr);
+  vQueueAddToRegistry(dp0.comm_rot, "rotary_queue");
+  vQueueAddToRegistry(dp0.comm_sw, "rotary_sw_queue");
+  vQueueAddToRegistry(sensor_1_queue, "sensor_1_queue");
 
-    xTaskCreate(display_task, "SSD1306", 512, (void *) nullptr,
-                tskIDLE_PRIORITY + 1, nullptr);
-#endif
-#if 1
-    xTaskCreate(i2c_task, "i2c test", 512, (void *) nullptr,
-                tskIDLE_PRIORITY + 1, nullptr);
-#endif
-#if 0
-    xTaskCreate(tls_task, "tls test", 6000, (void *) nullptr,
-                tskIDLE_PRIORITY + 1, nullptr);
-#endif
-    vTaskStartScheduler();
+  vTaskStartScheduler();
 
-    while(true){};
-}
-
-#include <cstdio>
-#include "ModbusClient.h"
-#include "ModbusRegister.h"
-
-// We are using pins 0 and 1, but see the GPIO function select table in the
-// datasheet for information on which other pins can be used.
-#if 0
-#define UART_NR 0
-#define UART_TX_PIN 0
-#define UART_RX_PIN 1
-#else
-#define UART_NR 1
-#define UART_TX_PIN 4
-#define UART_RX_PIN 5
-#endif
-
-#define BAUD_RATE 9600
-#define STOP_BITS 2 // for real system (pico simualtor also requires 2 stop bits)
-
-#define USE_MODBUS
-
-void modbus_task(void *param) {
-
-    const uint led_pin = 22;
-    const uint button = 9;
-
-    // Initialize LED pin
-    gpio_init(led_pin);
-    gpio_set_dir(led_pin, GPIO_OUT);
-
-    gpio_init(button);
-    gpio_set_dir(button, GPIO_IN);
-    gpio_pull_up(button);
-
-    // Initialize chosen serial port
-    //stdio_init_all();
-
-    //printf("\nBoot\n");
-
-#ifdef USE_MODBUS
-    auto uart{std::make_shared<PicoOsUart>(UART_NR, UART_TX_PIN, UART_RX_PIN, BAUD_RATE, STOP_BITS)};
-    auto rtu_client{std::make_shared<ModbusClient>(uart)};
-    ModbusRegister rh(rtu_client, 241, 256);
-    ModbusRegister t(rtu_client, 241, 257);
-    ModbusRegister produal(rtu_client, 1, 0);
-    produal.write(100);
-    vTaskDelay((100));
-    produal.write(100);
-#endif
-
-    while (true) {
-#ifdef USE_MODBUS
-        gpio_put(led_pin, !gpio_get(led_pin)); // toggle  led
-        printf("RH=%5.1f%%\n", rh.read() / 10.0);
-        vTaskDelay(5);
-        printf("T =%5.1f%%\n", t.read() / 10.0);
-        vTaskDelay(3000);
-#endif
-    }
-
-
+  while (true) {
+  };
 }
 
 #include "ssd1306os.h"
-void display_task(void *param)
-{
-    auto i2cbus{std::make_shared<PicoI2C>(1, 400000)};
-    ssd1306os display(i2cbus);
-    display.fill(0);
-    display.text("Boot", 0, 0);
-    display.show();
-    while(true) {
-        vTaskDelay(100);
+void display_task(void *param) {
+  auto tpr = (display_params *)param;
+  auto i2cbus{std::make_shared<PicoI2C>(1, 400000)};
+  ssd1306os display(i2cbus);
+  static bool next;
+  // Screens
+  auto tem = std::make_shared<InfoItem>("Hum & Tem", display);
+  auto pres = std::make_shared<InfoItem>("Pressure", display);
+  auto co = std::make_shared<InfoItem>("CO2", display);
+  // Update Screens' data
+  tem->updateValue("Temp", std::to_string(72) + "%");
+  tem->updateValue("Humidity", std::to_string(60) + "%");
+  pres->updateValue("Pres", std::to_string(80) + "%");
+  co->updateValue("CO2", std::to_string(70) + "%");
+  // Menu
+  auto main_menu = std::make_shared<Menu>("Main menu", display);
+  main_menu->add_item(tem);
+  main_menu->add_item(pres);
+  main_menu->add_item(co);
+
+  while (true) {
+    main_menu->show();
+    //  INPUTS
+    //      ROTTER INPUT
+    while (xQueueReceive(tpr->comm_rot, &next, 0)) {
+      if (next) {
+        main_menu->event(MenuItem::up);
+      } else {
+        main_menu->event(MenuItem::down);
+      }
     }
-
-}
-
-void i2c_task(void *param) {
-    auto i2cbus{std::make_shared<PicoI2C>(0, 100000)};
-
-    const uint led_pin = 21;
-    const uint delay = pdMS_TO_TICKS(250);
-    gpio_init(led_pin);
-    gpio_set_dir(led_pin, GPIO_OUT);
-
-    uint8_t buffer[64] = {0};
-    i2cbus->write(0x50, buffer, 2);
-
-    auto rv = i2cbus->read(0x50, buffer, 64);
-    printf("rv=%u\n", rv);
-    for(int i = 0; i < 64; ++i) {
-        printf("%c", isprint(buffer[i]) ? buffer[i] : '_');
+    //      ROTTER BUTTON INPUT
+    if (xQueueReceive(tpr->comm_sw, &next, 0)) {
+      main_menu->event(MenuItem::ok);
     }
-    printf("\n");
-
-    buffer[0]=0;
-    buffer[1]=64;
-    rv = i2cbus->transaction(0x50, buffer, 2, buffer, 64);
-    printf("rv=%u\n", rv);
-    for(int i = 0; i < 64; ++i) {
-        printf("%c", isprint(buffer[i]) ? buffer[i] : '_');
+    // EXAMPLES (how to update data using the incoming Queue data)
+    if (false /*xQueueReceive(tpr->comm_temp, &temperature, 0)*/) {
+      tem->updateValue("Temp", std::to_string(72 /*temperature*/) + "%");
     }
-    printf("\n");
-
-    while(true) {
-        gpio_put(led_pin, 1);
-        vTaskDelay(delay);
-        gpio_put(led_pin, 0);
-        vTaskDelay(delay);
+    if (false /*xQueueReceive(tpr->comm_hum, &humidity, 0)*/) {
+      tem->updateValue("Humidity", std::to_string(60 /*humidity*/) + "%");
     }
-
-
+    if (false /*xQueueReceive(tpr->comm_pres, &pressure, 0)*/) {
+      pres->updateValue("Pres", std::to_string(80 /*pressure*/) + "%");
+    }
+    uint16_t co2_que_value;
+    if (xQueueReceive(tpr->sensor_1_queue, &co2_que_value, 0)) {
+      printf("%d", co2_que_value);
+      co->updateValue("CO2", std::to_string(70 /*co2*/) + "%");
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
 }

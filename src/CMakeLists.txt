@@ -13,6 +13,8 @@ add_executable(${ProjectName}
         MenuItem.cpp
         InfoItem.h
         InfoItem.cpp
+        CO2Sensor.h
+        CO2Sensor.cpp
 
 
 
