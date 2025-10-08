@@ -4,7 +4,7 @@
 
 // Constructor
 PressureSensor::PressureSensor(i2c_inst_t *i2cPort, uint8_t addr)
-    : _i2c(i2cPort), _addr(addr) {}
+        : _i2c(i2cPort), _addr(addr) {}
 
 // Initialize I2C
 void PressureSensor::begin(uint sda_pin, uint scl_pin, uint baudrate) {

@@ -9,7 +9,7 @@
 
 class PressureSensor {
 public:
-    PressureSensor(i2c_inst_t i2cPort = i2c1, uint8_t addr = SDP610_ADDR);
+    PressureSensor(i2c_inst_t *i2cPort = i2c1, uint8_t addr = SDP610_ADDR);
 
     // Initialize sensor
     void begin(uint sda_pin = 14, uint scl_pin = 15, uint baudrate = 100000);
@@ -21,7 +21,7 @@ public:
     float readPressurePa();
 
 private:
-    i2c_inst_t_i2c;
+    i2c_inst_t *_i2c;
     uint8_t _addr;
 };
 

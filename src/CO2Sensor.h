@@ -5,11 +5,13 @@
 #include "PicoOsUart.h"
 #include "ModbusClient.h"
 #include "ModbusRegister.h"
-
+struct sensor_co2_params {
+    QueueHandle_t comm_co2;
+};
 class CO2Sensor {
 public:
     // Constructor
-    CO2Sensor(int uart_nr, int tx_pin, int rx_pin, int baudrate, uint8_t modbus_address);
+    CO2Sensor(int uart_nr, int tx_pin, int rx_pin, int baudrate, uint8_t modbus_address, QueueHandle_t queue, std::shared_ptr<PicoOsUart> uart);
 
     // Read CO2 value from sensor (in ppm)
     bool readCO2();
@@ -23,6 +25,7 @@ private:
     uint8_t address;
 
     ModbusRegister ppm;
+    QueueHandle_t queue;
 
 
     // FreeRTOS task function

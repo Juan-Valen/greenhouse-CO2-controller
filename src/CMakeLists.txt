@@ -45,8 +45,19 @@ add_executable(${ProjectName}
         display/ssd1306os.h
         display/ssd1306os.cpp
         CO2Sensor.cpp
-        CO2Sensor.cpp
         CO2Sensor.h
+        Menu.cpp
+        Menu.h
+        MenuItem.cpp
+        MenuItem.h
+        rotary.cpp
+        rotary.h
+        InfoItem.cpp
+        InfoItem.h
+        hmp60.cpp
+        PressureSensor.cpp
+        PressureSensor.h
+
 )
 
 target_include_directories(${ProjectName} PRIVATE

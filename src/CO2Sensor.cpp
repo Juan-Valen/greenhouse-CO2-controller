@@ -9,12 +9,14 @@
 
 
 
-CO2Sensor::CO2Sensor(int uart_nr, int tx_pin, int rx_pin, int baudrate, uint8_t modbus_address)
+CO2Sensor::CO2Sensor(int uart_nr, int tx_pin, int rx_pin, int baudrate, uint8_t modbus_address, QueueHandle_t queue, std::shared_ptr<PicoOsUart> uart)
         : address(modbus_address),
-          uart(std::make_shared<PicoOsUart>(uart_nr, tx_pin, rx_pin, baudrate, 2)),
+          uart(std::move(uart)),
           modbus(std::make_shared<ModbusClient>(uart)),
-          ppm(modbus, 241, 0x0100)
+          ppm(modbus, 241, 0x0100),
+          queue(queue)
 {
+
 }
 
 
@@ -31,14 +33,19 @@ bool CO2Sensor::readCO2()
 }
 void CO2Sensor::startTask(uint32_t interval_ms)
 {
-    xTaskCreate(taskFunc, "CO2Task", 1024, this, tskIDLE_PRIORITY + 1, nullptr);
+
+    xTaskCreate(taskFunc, "CO2Task", 1024, (void*) queue, tskIDLE_PRIORITY + 1, nullptr);
 }
+
 
 void CO2Sensor::taskFunc(void *param)
 {
+    auto tpr = (QueueHandle_t)param;
+
     CO2Sensor *self = static_cast<CO2Sensor*>(param);
           while (1){
-        self->readCO2();
+        auto data = self->readCO2();
+        xQueueSendToBack(tpr, (void *)&data, 0);
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
