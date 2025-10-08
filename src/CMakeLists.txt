@@ -5,6 +5,16 @@ add_executable(${ProjectName}
         Fmutex.h
         blinker.cpp
         blinker.h
+        rotary.h
+        rotary.cpp
+        Menu.h
+        Menu.cpp
+        MenuItem.h
+        MenuItem.cpp
+        InfoItem.h
+        InfoItem.cpp
+
+
 
 #        ipstack/IPStack.cpp
 #        ipstack/IPStack.h
