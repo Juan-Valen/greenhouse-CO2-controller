@@ -56,10 +56,10 @@ struct display_params {
   QueueHandle_t comm_rot;
   QueueHandle_t comm_sw;
   QueueHandle_t sensor_1_queue;
-  /*
+
 QueueHandle_t comm_temp;
 QueueHandle_t comm_hum;
-QueueHandle_t comm_pres;
+/*QueueHandle_t comm_pres;
    */
 };
 
