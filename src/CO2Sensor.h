@@ -13,7 +13,7 @@ public:
             uint8_t modbus_address);
 
   // Read CO2 value from sensor (in ppm)
-  bool readCO2();
+  uint16_t readCO2();
 
   // Optional: start FreeRTOS task to poll periodically
   void startTask(QueueHandle_t queue);

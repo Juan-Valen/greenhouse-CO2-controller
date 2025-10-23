@@ -17,8 +17,7 @@ struct SensorData {
 };
 class Hmp60sensor {
 public:
-    explicit Hmp60sensor(const std::shared_ptr<ModbusClient> &rtu_client, const int slave=241)
-            : rh_reg(rtu_client, slave, 256), t_reg(rtu_client, slave, 257) {}
+    explicit Hmp60sensor(const std::shared_ptr<ModbusClient> &rtu_client, const int slave=241);
 
     SensorData read();
 

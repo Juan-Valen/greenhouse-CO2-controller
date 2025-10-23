@@ -17,6 +17,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include "tempSensor.h"
 
 #include "hardware/timer.h"
 extern "C" {
@@ -105,10 +106,13 @@ int main() {
   // Queue
   rt0.comm_rot = xQueueCreate(20, sizeof(bool));
   rt_sw.comm_sw = xQueueCreate(5, sizeof(bool));
-  auto sensor_1_queue = xQueueCreate(5, sizeof(bool));
+  auto sensor_1_queue = xQueueCreate(5, sizeof(uint16_t));
+  auto comm_temp_queue = xQueueCreate(5, sizeof (SensorData));
+
   dp0.comm_rot = rt0.comm_rot;
   dp0.comm_sw = rt_sw.comm_sw;
   dp0.sensor_1_queue = sensor_1_queue;
+  dp0.comm_temp = comm_temp_queue;
   // Semaphores
   gpio_sem_rot = xSemaphoreCreateBinary();
   gpio_sem_rot_sw = xSemaphoreCreateBinary();
@@ -117,6 +121,12 @@ int main() {
   CO2Sensor co2(1, 4, 5, 9600,
                 240);            // UART1, TX4/RX5, 9600 bps, Modbus address 240
   co2.startTask(sensor_1_queue); // poll every 1 second
+
+  // Temp & humidity
+  //ModbusClient mc(std::make_shared<PicoOsUart>(1,4,5,9600));
+  //Hmp60sensor hmp60(std::make_shared<ModbusClient>(mc));
+  //hmp60.startTask(comm_temp_queue);
+
   // TASKS
   xTaskCreate(rotary_task, "rotary_encoder", 256, (void *)&rt0,
               tskIDLE_PRIORITY + 1, nullptr);
@@ -127,6 +137,7 @@ int main() {
   vQueueAddToRegistry(dp0.comm_rot, "rotary_queue");
   vQueueAddToRegistry(dp0.comm_sw, "rotary_sw_queue");
   vQueueAddToRegistry(sensor_1_queue, "sensor_1_queue");
+  vQueueAddToRegistry(comm_temp_queue, "comm_temp_queue");
 
   vTaskStartScheduler();
 
@@ -171,9 +182,11 @@ void display_task(void *param) {
       main_menu->event(MenuItem::ok);
     }
     // EXAMPLES (how to update data using the incoming Queue data)
-    if (false /*xQueueReceive(tpr->comm_temp, &temperature, 0)*/) {
-      tem->updateValue("Temp", std::to_string(72 /*temperature*/) + "%");
-    }
+
+    uint16_t temperature;
+    /*if (xQueueReceive(tpr->comm_temp, &temperature, 0)) {
+      tem->updateValue("Temp", std::to_string(temperature) + " Celsius?");
+    }*/
     if (false /*xQueueReceive(tpr->comm_hum, &humidity, 0)*/) {
       tem->updateValue("Humidity", std::to_string(60 /*humidity*/) + "%");
     }
@@ -182,8 +195,8 @@ void display_task(void *param) {
     }
     uint16_t co2_que_value;
     if (xQueueReceive(tpr->sensor_1_queue, &co2_que_value, 0)) {
-      printf("%d", co2_que_value);
-      co->updateValue("CO2", std::to_string(70 /*co2*/) + "%");
+      printf(" CO2 queue value: %d\n", co2_que_value);
+      co->updateValue("CO2", std::to_string(co2_que_value) + " ppm");
     }
     vTaskDelay(pdMS_TO_TICKS(10));
   }
