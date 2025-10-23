@@ -14,21 +14,13 @@ struct co2_task_params {
     QueueHandle_t queue;
 };
 
-CO2Sensor::CO2Sensor(int uart_nr, int tx_pin, int rx_pin, int baudrate,
-                     uint8_t modbus_address)
-    : address(modbus_address),
-      uart(std::make_shared<PicoOsUart>(uart_nr, tx_pin, rx_pin, baudrate, 2)),
-      modbus(std::make_shared<ModbusClient>(uart)), ppm(modbus, 240, 0x0100) {}
+CO2Sensor::CO2Sensor(const std::shared_ptr<ModbusClient> &rtu_client, const int slave)
+: ppm(rtu_client, slave, 0x100){}
 
-uint16_t CO2Sensor::readCO2() {
-  /*produal.write(100);
-  vTaskDelay((100));
-  produal.write(100);*/
-  //printf("PPM=%5.1f%%\n", ppm.read() / 10.0);
-  vTaskDelay(5);
-  vTaskDelay(3000);
+double CO2Sensor::readCO2() {
+  auto c = ppm.read();
   printf("CO2 value from sensor class: %d\n",ppm.read());
-  return ppm.read();
+  return c;
 }
 void CO2Sensor::startTask(QueueHandle_t queue) {
     auto *params = new co2_task_params{this, queue};
@@ -41,7 +33,7 @@ void CO2Sensor::taskFunc(void *param) {
     auto q = p->queue;
 
     while (1) {
-        uint16_t data = self->readCO2();
+        auto data = self->readCO2();
         xQueueSendToBack(q, &data, 0);
         vTaskDelay(pdMS_TO_TICKS(1000));
     }

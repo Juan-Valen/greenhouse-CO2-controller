@@ -17,6 +17,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <iomanip>
 #include "tempSensor.h"
 
 #include "hardware/timer.h"
@@ -106,26 +107,32 @@ int main() {
   // Queue
   rt0.comm_rot = xQueueCreate(20, sizeof(bool));
   rt_sw.comm_sw = xQueueCreate(5, sizeof(bool));
-  auto sensor_1_queue = xQueueCreate(5, sizeof(uint16_t));
-  auto comm_temp_queue = xQueueCreate(5, sizeof (SensorData));
+  auto sensor_1_queue = xQueueCreate(5, sizeof(double));
+  auto comm_temp_queue = xQueueCreate(5, sizeof (float));
+  auto humidity_queue = xQueueCreate(5, sizeof (float));
 
   dp0.comm_rot = rt0.comm_rot;
   dp0.comm_sw = rt_sw.comm_sw;
   dp0.sensor_1_queue = sensor_1_queue;
   dp0.comm_temp = comm_temp_queue;
+  dp0.comm_hum = humidity_queue;
   // Semaphores
   gpio_sem_rot = xSemaphoreCreateBinary();
   gpio_sem_rot_sw = xSemaphoreCreateBinary();
+
+  auto uart = std::make_shared<PicoOsUart>(1, 4, 5, 9600, 2);
+  auto modbus = std::make_shared<ModbusClient>(uart);
   // CO2
 
-  CO2Sensor co2(1, 4, 5, 9600,
-                240);            // UART1, TX4/RX5, 9600 bps, Modbus address 240
+  CO2Sensor co2(modbus);            // UART1, TX4/RX5, 9600 bps, Modbus address 240
   co2.startTask(sensor_1_queue); // poll every 1 second
 
   // Temp & humidity
-  //ModbusClient mc(std::make_shared<PicoOsUart>(1,4,5,9600));
-  //Hmp60sensor hmp60(std::make_shared<ModbusClient>(mc));
-  //hmp60.startTask(comm_temp_queue);
+  Hmp60sensor temperature(modbus, 0);
+  temperature.startTask(comm_temp_queue);
+  Hmp60sensor humidity(modbus, 1);
+  humidity.startTask(humidity_queue);
+
 
   // TASKS
   xTaskCreate(rotary_task, "rotary_encoder", 256, (void *)&rt0,
@@ -156,8 +163,8 @@ void display_task(void *param) {
   auto pres = std::make_shared<InfoItem>("Pressure", display);
   auto co = std::make_shared<InfoItem>("CO2", display);
   // Update Screens' data
-  tem->updateValue("Temp", std::to_string(72) + "%");
-  tem->updateValue("Humidity", std::to_string(60) + "%");
+  //tem->updateValue("Temp", std::to_string(72) + "%");
+  //tem->updateValue("Humidity", std::to_string(60) + "%");
   pres->updateValue("Pres", std::to_string(80) + "%");
   co->updateValue("CO2", std::to_string(70) + "%");
   // Menu
@@ -183,20 +190,29 @@ void display_task(void *param) {
     }
     // EXAMPLES (how to update data using the incoming Queue data)
 
-    uint16_t temperature;
-    /*if (xQueueReceive(tpr->comm_temp, &temperature, 0)) {
-      tem->updateValue("Temp", std::to_string(temperature) + " Celsius?");
-    }*/
-    if (false /*xQueueReceive(tpr->comm_hum, &humidity, 0)*/) {
-      tem->updateValue("Humidity", std::to_string(60 /*humidity*/) + "%");
+    float temperature;
+    if (xQueueReceive(tpr->comm_temp, &temperature, 0)) {
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(1) << temperature;
+        tem->updateValue("Temp ", oss.str() + "C");
+        printf("Temperature queue value: %s C\n", oss.str().c_str());
+    }
+    float humidity;
+    if (xQueueReceive(tpr->comm_hum, &humidity, 0)) {
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(1) << humidity;
+        tem->updateValue("Humidity ", oss.str() + "%");
+        printf("Humidity queue value: %s %%\n", oss.str().c_str());
     }
     if (false /*xQueueReceive(tpr->comm_pres, &pressure, 0)*/) {
       pres->updateValue("Pres", std::to_string(80 /*pressure*/) + "%");
     }
-    uint16_t co2_que_value;
+    double co2_que_value;
     if (xQueueReceive(tpr->sensor_1_queue, &co2_que_value, 0)) {
-      printf(" CO2 queue value: %d\n", co2_que_value);
-      co->updateValue("CO2", std::to_string(co2_que_value) + " ppm");
+      std::ostringstream oss;
+      oss << std::fixed << std::setprecision(1) << co2_que_value;
+      printf(" CO2 queue value: %s ppm\n", oss.str().c_str());
+      co->updateValue("CO2", oss.str() + " ppm");
     }
     vTaskDelay(pdMS_TO_TICKS(10));
   }
