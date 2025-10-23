@@ -183,10 +183,11 @@ void display_task(void *param) {
             pres->updateValue("Pres", std::to_string(80 /*pressure*/) + "%");
         }
 
-        if (xQueueReceive(tpr->comm_co2, &co2, 0)) {
-
-            co->updateValue("CO2", std::to_string(co2) + " ppm");
-        }
+       /* if (xQueueReceive(tpr->comm_co2, &co2, 0)) {
+            std::string value = std::to_string((int)co2);
+            const char* values = value.c_str();
+            co->updateValue("CO2", values);
+        }*/
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
